@@ -13,22 +13,15 @@ from indextts.infer_v2 import IndexTTS2
 from google.cloud import storage
 import runpod
 
-# ---------------- CONFIG ----------------
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+
 BUCKET_NAME = "runpod_bucket_testing"
-CREDS_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"  # Drive ID for service account JSON
+CREDS_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
 
-# ---------------- INIT MODEL ----------------
-tts = IndexTTS2(
-    cfg_path="checkpoints/config.yaml",
-    model_dir="checkpoints",
-    use_fp16=True,
-    use_cuda_kernel=False,
-    use_deepspeed=False
-)
+log_prefix = "[DEBUG]"
 
-# ---------------- HELPERS ----------------
 def log(msg):
-    print(f"[DEBUG] {msg}", flush=True)
+    print(f"{log_prefix} {msg}", flush=True)
 
 def clear_mem():
     gc.collect()
@@ -77,6 +70,27 @@ def save_temp(data, suffix=".wav"):
     log(f"Saved temp file: {temp_path}")
     return temp_path
 
+# ---------------- INIT MODEL ----------------
+tts = IndexTTS2(
+    cfg_path="checkpoints/config.yaml",
+    model_dir="checkpoints",
+    use_fp16=True,
+    use_cuda_kernel=False,
+    use_deepspeed=False
+)
+
+# ---------------- RUN infer_v2.py ONCE ----------------
+try:
+    log("Running indextts/infer_v2.py at startup...")
+    subprocess.run(
+        ["uv", "run", "indextts/infer_v2.py"],
+        check=True,
+        env=os.environ
+    )
+    log("Finished running infer_v2.py")
+except subprocess.CalledProcessError as e:
+    log(f"Failed to run infer_v2.py: {e}")
+
 # ---------------- HANDLER ----------------
 def handler(event):
     inp = event.get("input", {})
@@ -88,7 +102,6 @@ def handler(event):
     out_path = f"/tmp/out_{uid}.mp3"
 
     try:
-        # ----- TTS CLONE -----
         if task == "tts_clone":
             spk_path = save_temp(download_file(inp["spk_url"]))
             clear_mem()
@@ -96,7 +109,6 @@ def handler(event):
             clear_mem()
             return {"status": "success", "url": upload_to_gcs(out_path)}
 
-        # ----- EMOTION AUDIO -----
         if task == "tts_emotion_audio":
             spk_path = save_temp(download_file(inp["spk_url"]))
             emo_path = save_temp(download_file(inp["emo_url"]))
@@ -111,7 +123,6 @@ def handler(event):
             clear_mem()
             return {"status": "success", "url": upload_to_gcs(out_path)}
 
-        # ----- EMOTION VECTOR -----
         if task == "tts_emotion_vector":
             spk_path = save_temp(download_file(inp["spk_url"]))
             vector = [float(x) for x in inp["emo_vector"].split(",")]
@@ -126,7 +137,6 @@ def handler(event):
             clear_mem()
             return {"status": "success", "url": upload_to_gcs(out_path)}
 
-        # ----- AUTO EMOTION TEXT -----
         if task == "tts_emotion_text_auto":
             spk_path = save_temp(download_file(inp["spk_url"]))
             clear_mem()
@@ -141,7 +151,6 @@ def handler(event):
             clear_mem()
             return {"status": "success", "url": upload_to_gcs(out_path)}
 
-        # ----- CUSTOM EMOTION TEXT -----
         if task == "tts_emotion_text_custom":
             spk_path = save_temp(download_file(inp["spk_url"]))
             clear_mem()
@@ -157,7 +166,6 @@ def handler(event):
             clear_mem()
             return {"status": "success", "url": upload_to_gcs(out_path)}
 
-        # ----- MERGE VIDEO + AUDIO -----
         if task == "merge":
             video = download_file(inp["video_url"])
             audio = download_file(inp["audio_url"])
