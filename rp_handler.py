@@ -20,6 +20,14 @@ CREDS_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
 
 log_prefix = "[DEBUG]"
 
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="IndexTeam/IndexTTS-2",
+    local_dir="checkpoints"
+)
+
+
 def log(msg):
     print(f"{log_prefix} {msg}", flush=True)
 
