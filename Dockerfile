@@ -16,8 +16,6 @@ RUN uv sync --all-extras
 
 RUN uv pip install "huggingface-hub[cli,hf_xet]" runpod google-cloud-storage protobuf==3.20.*
 
-RUN hf download IndexTeam/IndexTTS-2 --local-dir=checkpoints
-
 COPY rp_handler.py /workspace/index-tts/rp_handler.py
 
 ENV PYTHONPATH="$PYTHONPATH:."
