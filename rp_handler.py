@@ -14,10 +14,8 @@ from google.cloud import storage
 import runpod
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-
 BUCKET_NAME = "runpod_bucket_testing"
 CREDS_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
-
 log_prefix = "[DEBUG]"
 
 from huggingface_hub import snapshot_download
