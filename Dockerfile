@@ -1,13 +1,11 @@
 FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
 RUN apt update && apt install -y ffmpeg git-lfs
-RUN git lfs install
 
-RUN git clone https://github.com/index-tts/index-tts.git /workspace/index-tts
+RUN git lfs install
+RUN GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/index-tts/index-tts.git /workspace/index-tts
 
 WORKDIR /workspace/index-tts
-
-RUN git lfs pull
 
 COPY rp_handler.py /workspace/index-tts/rp_handler.py
 
