@@ -14,7 +14,7 @@ COPY rp_handler.py /workspace/index-tts/rp_handler.py
 # Install uv and dependencies inside virtual env
 RUN pip install -U uv
 RUN uv sync --all-extras
-RUN uv pip install "huggingface-hub[cli,hf_xet]" runpod boto3 protobuf==3.20.* hf_transfer
+RUN uv pip install "huggingface-hub[cli,hf_xet]" runpod google-cloud-storage protobuf==3.20.* hf_transfer
 
 ENV PYTHONPATH="$PYTHONPATH:."
 ENV VIRTUAL_ENV=/workspace/index-tts/.venv
