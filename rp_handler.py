@@ -2,29 +2,31 @@ import os
 import gc
 import uuid
 import tempfile
-import json
-import requests
 import subprocess
 import shutil
-from datetime import timedelta
-
 import torch
-from indextts.infer_v2 import IndexTTS2
-from google.cloud import storage
 import runpod
-
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-BUCKET_NAME = "runpod_bucket_testing"
-CREDS_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
-log_prefix = "[DEBUG]"
-
+import requests
+from datetime import timedelta
+from indextts.infer_v2 import IndexTTS2
+import boto3
 from huggingface_hub import snapshot_download
 
+# -------------------- CONFIG --------------------
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+
+AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
+BUCKET_NAME = os.environ.get("AWS_BUCKET_NAME", "runpodstorageforserverless")
+
+log_prefix = "[DEBUG]"
+
+# -------------------- Setup --------------------
 snapshot_download(
     repo_id="IndexTeam/IndexTTS-2",
     local_dir="checkpoints"
 )
-
 
 def log(msg):
     print(f"{log_prefix} {msg}", flush=True)
@@ -34,34 +36,6 @@ def clear_mem():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
-
-def fetch_gcs_json_from_drive(file_id: str, save_path="/tmp/gcs_creds.json"):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    r = requests.get(url)
-    r.raise_for_status()
-    with open(save_path, "wb") as f:
-        f.write(r.content)
-    log(f"GCS creds saved to {save_path}")
-
-def get_gcs_client():
-    creds_path = "/tmp/gcs_creds.json"
-    if not os.path.exists(creds_path):
-        fetch_gcs_json_from_drive(CREDS_FILE_ID, creds_path)
-    return storage.Client.from_service_account_json(creds_path)
-
-def upload_to_gcs(local_path, prefix="tts_outputs"):
-    try:
-        client = get_gcs_client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob_path = f"{prefix}/{uuid.uuid4()}{os.path.splitext(local_path)[1]}"
-        blob = bucket.blob(blob_path)
-        blob.upload_from_filename(local_path)
-        url = blob.generate_signed_url(expiration=timedelta(hours=6))
-        log(f"Uploaded to GCS: {url}")
-        return url
-    finally:
-        if os.path.exists(local_path):
-            os.remove(local_path)
 
 def download_file(url):
     log(f"Downloading file from {url}")
@@ -76,6 +50,34 @@ def save_temp(data, suffix=".wav"):
     log(f"Saved temp file: {temp_path}")
     return temp_path
 
+# -------------------- AWS S3 CLIENT --------------------
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
+
+def upload_to_s3(local_path, prefix="tts_outputs"):
+    """
+    Upload a local file to S3 under the specified prefix and return the public URL.
+    Bucket must allow public read via policy.
+    """
+    try:
+        key = f"{prefix}/{uuid.uuid4()}{os.path.splitext(local_path)[1]}"
+        s3.upload_file(
+            Filename=local_path,
+            Bucket=BUCKET_NAME,
+            Key=key,
+            ExtraArgs={"ContentType": "audio/mpeg"}  # Adjust MIME if needed
+        )
+        url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{key}"
+        log(f"Uploaded to S3: {url}")
+        return url
+    finally:
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
 # ---------------- INIT MODEL ----------------
 tts = IndexTTS2(
     cfg_path="checkpoints/config.yaml",
@@ -84,18 +86,6 @@ tts = IndexTTS2(
     use_cuda_kernel=False,
     use_deepspeed=False
 )
-
-# ---------------- RUN infer_v2.py ONCE ----------------
-try:
-    log("Running indextts/infer_v2.py at startup...")
-    subprocess.run(
-        ["uv", "run", "indextts/infer_v2.py"],
-        check=True,
-        env=os.environ
-    )
-    log("Finished running infer_v2.py")
-except subprocess.CalledProcessError as e:
-    log(f"Failed to run infer_v2.py: {e}")
 
 # ---------------- HANDLER ----------------
 def handler(event):
@@ -113,7 +103,7 @@ def handler(event):
             clear_mem()
             tts.infer(spk_audio_prompt=spk_path, text=inp["text"], output_path=out_path)
             clear_mem()
-            return {"status": "success", "url": upload_to_gcs(out_path)}
+            return {"status": "success", "url": upload_to_s3(out_path)}
 
         if task == "tts_emotion_audio":
             spk_path = save_temp(download_file(inp["spk_url"]))
@@ -127,7 +117,7 @@ def handler(event):
                 output_path=out_path
             )
             clear_mem()
-            return {"status": "success", "url": upload_to_gcs(out_path)}
+            return {"status": "success", "url": upload_to_s3(out_path)}
 
         if task == "tts_emotion_vector":
             spk_path = save_temp(download_file(inp["spk_url"]))
@@ -141,7 +131,7 @@ def handler(event):
                 output_path=out_path
             )
             clear_mem()
-            return {"status": "success", "url": upload_to_gcs(out_path)}
+            return {"status": "success", "url": upload_to_s3(out_path)}
 
         if task == "tts_emotion_text_auto":
             spk_path = save_temp(download_file(inp["spk_url"]))
@@ -155,7 +145,7 @@ def handler(event):
                 output_path=out_path
             )
             clear_mem()
-            return {"status": "success", "url": upload_to_gcs(out_path)}
+            return {"status": "success", "url": upload_to_s3(out_path)}
 
         if task == "tts_emotion_text_custom":
             spk_path = save_temp(download_file(inp["spk_url"]))
@@ -170,7 +160,7 @@ def handler(event):
                 output_path=out_path
             )
             clear_mem()
-            return {"status": "success", "url": upload_to_gcs(out_path)}
+            return {"status": "success", "url": upload_to_s3(out_path)}
 
         if task == "merge":
             video = download_file(inp["video_url"])
@@ -191,7 +181,7 @@ def handler(event):
                 "-c:a", "aac",
                 merged_path
             ], check=True)
-            url = upload_to_gcs(merged_path, prefix="merged")
+            url = upload_to_s3(merged_path, prefix="merged")
             shutil.rmtree(temp_dir, ignore_errors=True)
             return {"status": "success", "url": url}
 
